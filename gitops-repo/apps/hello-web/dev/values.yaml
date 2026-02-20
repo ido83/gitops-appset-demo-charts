@@ -7,7 +7,7 @@ replicaCount: 1
 image:
   repository: idona/demo-app-set
   # Jenkins updates ONLY this field to promote a specific immutable artifact.
-  tag: "v1"
+  tag: "v2"
   pullPolicy: IfNotPresent
 
 ingress:
@@ -34,4 +34,4 @@ resources:
 appMetadata:
   environment: dev
   owner: platform-team
-  lastPromotedTag: ""
+  lastPromotedTag: "v2"
