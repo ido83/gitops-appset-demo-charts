@@ -18,20 +18,20 @@ spec:
         repoURL: https://github.com/ido83/gitops-appset-demo-charts.git
         revision: master
         directories:
-          - path: apps/*/dev
-          - path: apps/*/staging
-          - path: apps/*/prod
-        # We map path segments into a stable set of values.* fields so the template is DRY.
-        # path.segments for apps/<app>/<env>:
-        #   index 0 = "apps"
-        #   index 1 = "<app>"
-        #   index 2 = "<env>"
+          - path: gitops-repo/apps/*/dev
+          - path: gitops-repo/apps/*/staging
+          - path: gitops-repo/apps/*/prod
+        # path.segments for gitops-repo/apps/<app>/<env>:
+        #   index 0 = "gitops-repo"
+        #   index 1 = "apps"
+        #   index 2 = "<app>"
+        #   index 3 = "<env>"
         values:
-          app: "{{ index .path.segments 1 }}"
-          env: "{{ index .path.segments 2 }}"
-          appName: "{{ index .path.segments 1 }}-{{ index .path.segments 2 }}"
-          namespace: "{{ index .path.segments 1 }}-{{ index .path.segments 2 }}"
-          valuesFile: "$values/apps/{{ index .path.segments 1 }}/{{ index .path.segments 2 }}/values.yaml"
+          app: "{{ index .path.segments 2 }}"
+          env: "{{ index .path.segments 3 }}"
+          appName: "{{ index .path.segments 2 }}-{{ index .path.segments 3 }}"
+          namespace: "{{ index .path.segments 2 }}-{{ index .path.segments 3 }}"
+          valuesFile: "$values/gitops-repo/apps/{{ index .path.segments 2 }}/{{ index .path.segments 3 }}/values.yaml"
           isPreview: "false"
           # Keep these keys defined for both generators to satisfy missingkey=error.
           prNumber: ""
@@ -60,7 +60,7 @@ spec:
     #       env: "preview"
     #       appName: "hello-web-pr-{{ .number }}-{{ .branch_slug }}"
     #       namespace: "pr-{{ .number }}-{{ .branch_slug }}"
-    #       valuesFile: "$values/apps/hello-web/preview/values.yaml"
+    #       valuesFile: "$values/gitops-repo/apps/hello-web/preview/values.yaml"
     #       isPreview: "true"
     #       prNumber: "{{ .number }}"
     #       prBranch: "{{ .branch }}"
@@ -82,9 +82,9 @@ spec:
         namespace: "{{ .values.namespace }}"
 
       # Multi-source Application:
-      # - Source[0] is the Helm chart (generic)
+      # - Source[0] is the Helm chart (charts/generic-app in charts repo)
       # - Source[1] provides values files via ref: values ($values/...)
-      # This is DRY: chart is reused; env values live in apps/<app>/<env>/values.yaml.
+      #   Both sources point to the charts repo since values live there too.
       sources:
         - repoURL: https://github.com/ido83/gitops-appset-demo-charts.git
           targetRevision: master
@@ -117,7 +117,8 @@ spec:
                         pathType: Prefix
               {{- end }}
 
-        - repoURL: https://github.com/ido83/gitops-appset-demo-app.git
+        # Values files ($values/...) are in the same charts repo.
+        - repoURL: https://github.com/ido83/gitops-appset-demo-charts.git
           targetRevision: master
           ref: values
 
