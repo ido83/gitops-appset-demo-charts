@@ -220,141 +220,137 @@ Then uncomment the `pullRequest` generator block in
 Promotion = updating `image.tag` in a target environment's `values.yaml`, committing, and pushing.
 ArgoCD detects the Git change and rolls out the new version automatically.
 
-### The promotion anchor
+### How the anchor works
 
-Each environment has one file that acts as the promotion anchor:
-
-```
-gitops-repo/apps/hello-web/
-├── dev/values.yaml       ← image.tag updated here first (by Jenkins or manually)
-├── staging/values.yaml   ← promoted from dev
-└── prod/values.yaml      ← promoted from staging (requires approval gate)
-```
-
-The only field that changes during promotion:
+Each environment's `values.yaml` contains a `promotionAnchor` block:
 
 ```yaml
-image:
-  repository: idona/demo-app-set
-  tag: "v2"              # ← this is the promotion anchor
+appMetadata:
+  lastPromotedTag: "v2"
+  promotionAnchor:
+    gitSHA: "a12a8eb3"    # git SHA of the source env's last values.yaml commit
+    promotedAt: "2026-02-20T17:55:00Z"
+    fromEnv: "dev"
+```
+
+**`gitSHA` is the key field.** It records the exact git commit in the source environment
+that you are promoting. This gives you:
+
+- **Traceability** — you can `git show <gitSHA>` to see exactly what was verified before promotion.
+- **Dirty-state protection** — the script refuses to promote if the source file has uncommitted local changes (the SHA would be meaningless).
+- **Chain enforcement** — promoting staging → prod requires that staging itself was previously promoted via the script (non-empty anchor SHA), preventing manual bypasses.
+
+**Promotion chain:**
+
+```
+CI build
+   ↓  pushes image + updates dev/values.yaml
+dev  (anchor.gitSHA = CI commit SHA)
+   ↓  promote.sh dev→staging
+staging  (anchor.gitSHA = dev's last commit SHA)
+   ↓  promote.sh staging→prod  [+ approval gate]
+prod  (anchor.gitSHA = staging's last commit SHA)
 ```
 
 ---
 
-### Step-by-step: Promote dev → staging
+### Promote using the script
 
-**Step 1 — confirm what tag is currently running in dev:**
+The `scripts/promote.sh` script handles anchor updates, guards, commit, and push in one step.
+
+**Requirements:** `git`, `yq` v4+
+
+**Promote dev → staging:**
 
 ```bash
-kubectl get deployment -n hello-web-dev \
-  -o jsonpath='{.items[0].spec.template.spec.containers[0].image}'
-# idona/demo-app-set:v2
-
-# Or read directly from the values file:
-grep 'tag:' gitops-repo/apps/hello-web/dev/values.yaml
-# tag: "v2"
+./scripts/promote.sh dev staging
 ```
 
-**Step 2 — update staging values.yaml:**
+**Promote staging → prod:**
 
 ```bash
-# Using yq (recommended — safe YAML edit):
-TAG="$(yq -r '.image.tag' gitops-repo/apps/hello-web/dev/values.yaml)"
-
-yq -i ".image.tag = \"${TAG}\""                    gitops-repo/apps/hello-web/staging/values.yaml
-yq -i ".appMetadata.lastPromotedTag = \"${TAG}\""  gitops-repo/apps/hello-web/staging/values.yaml
+./scripts/promote.sh staging prod
 ```
 
-Or edit manually in your editor — change only the `tag` field in
-[gitops-repo/apps/hello-web/staging/values.yaml](gitops-repo/apps/hello-web/staging/values.yaml).
+**What the script does:**
+1. Reads `image.tag` and `image.repository` from the source env's `values.yaml`
+2. Gets the git SHA of the last commit that touched the source file (`git log -1`)
+3. Refuses if source file has uncommitted changes (anchor would be untrustworthy)
+4. Refuses if source env has no anchor SHA (not promoted via script — for staging→prod)
+5. Writes `image.tag`, `lastPromotedTag`, `promotionAnchor.gitSHA`, `promotedAt`, `fromEnv` to target
+6. Commits and pushes — ArgoCD picks up the change and syncs
 
-**Step 3 — commit and push:**
+**Example output:**
 
-```bash
-git add gitops-repo/apps/hello-web/staging/values.yaml
-git commit -m "chore(gitops): promote hello-web staging -> ${TAG}"
-git push origin master
+```
+┌─────────────────────────────────────────────────────┐
+│  GitOps Promotion                                   │
+├─────────────────────────────────────────────────────┤
+│  App        : hello-web                             │
+│  From       : dev                                   │
+│  To         : staging                               │
+│  Image      : idona/demo-app-set:v2                 │
+│  Anchor SHA : a12a8eb3                              │
+│  Promoted at: 2026-02-20T17:55:00Z                  │
+└─────────────────────────────────────────────────────┘
 ```
 
-**Step 4 — ArgoCD syncs automatically (within ~3 minutes). Verify:**
+**Verify after promotion:**
 
 ```bash
+# Check ArgoCD picked up the change
 kubectl -n argocd get application hello-web-staging
-# NAME                SYNC STATUS   HEALTH STATUS
-# hello-web-staging   Synced        Healthy
 
-kubectl get deployment -n hello-web-staging \
-  -o jsonpath='{.items[0].spec.template.spec.containers[0].image}'
-# idona/demo-app-set:v2
-```
-
-**Force immediate sync (optional — skips the poll wait):**
-
-```bash
+# Force immediate sync (skips the ~3 min poll wait)
 kubectl -n argocd patch application hello-web-staging \
   --type merge \
   -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'
+
+# Confirm running image
+kubectl get deployment -n hello-web-staging \
+  -o jsonpath='{.items[0].spec.template.spec.containers[0].image}'
 ```
 
 ---
 
-### Step-by-step: Promote staging → prod
+### Inspect the anchor trail
 
-Same flow, different file. In production, this should be gated behind a PR approval or Jenkins `input` step.
-
-```bash
-TAG="$(yq -r '.image.tag' gitops-repo/apps/hello-web/staging/values.yaml)"
-
-yq -i ".image.tag = \"${TAG}\""                    gitops-repo/apps/hello-web/prod/values.yaml
-yq -i ".appMetadata.lastPromotedTag = \"${TAG}\""  gitops-repo/apps/hello-web/prod/values.yaml
-
-git add gitops-repo/apps/hello-web/prod/values.yaml
-git commit -m "chore(gitops): promote hello-web prod -> ${TAG}"
-git push origin master
-```
-
----
-
-### Full promotion flow (all envs in one script)
+After a full dev → staging → prod promotion you can trace the full chain:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
+# Show anchor in staging (points back to the dev commit that was promoted)
+yq '.appMetadata.promotionAnchor' gitops-repo/apps/hello-web/staging/values.yaml
 
-APP="hello-web"
-TAG="${1:?Usage: $0 <image-tag>}"   # e.g. ./promote.sh v3
+# Inspect what that dev commit contained
+git show <gitSHA from above>
 
-REPO_ROOT="gitops-repo"
-
+# Show the full chain
 for ENV in dev staging prod; do
-  FILE="${REPO_ROOT}/apps/${APP}/${ENV}/values.yaml"
-  echo "Promoting ${APP} ${ENV} -> ${TAG}"
-  yq -i ".image.tag = \"${TAG}\""                   "${FILE}"
-  yq -i ".appMetadata.lastPromotedTag = \"${TAG}\"" "${FILE}"
-  git add "${FILE}"
+  echo "=== ${ENV} ==="
+  yq '.appMetadata | {"tag": .lastPromotedTag, "anchor": .promotionAnchor}' \
+    gitops-repo/apps/hello-web/${ENV}/values.yaml
 done
-
-git commit -m "chore(gitops): promote ${APP} all envs -> ${TAG}"
-git push origin master
 ```
 
 ---
 
 ### Rollback
 
-Rollback is just promoting an older tag. Find the last known-good tag in git history:
+Rollback is promoting an older tag. Find the last known-good SHA in git history:
 
 ```bash
 git log --oneline gitops-repo/apps/hello-web/prod/values.yaml
-# abc1234 chore(gitops): promote hello-web prod -> v2
-# def5678 chore(gitops): promote hello-web prod -> v1  ← rollback target
+# abc1234 chore(gitops): promote hello-web staging→prod tag=v2 anchor=0bf290f
+# def5678 chore(gitops): promote hello-web staging→prod tag=v1 anchor=...
 
-# Promote v1 back to prod:
-yq -i '.image.tag = "v1"' gitops-repo/apps/hello-web/prod/values.yaml
+# Roll back prod to v1 — revert the values file to that commit and re-promote:
+git show def5678:gitops-repo/apps/hello-web/prod/values.yaml > /tmp/prod-rollback.yaml
+cp /tmp/prod-rollback.yaml gitops-repo/apps/hello-web/prod/values.yaml
 git add gitops-repo/apps/hello-web/prod/values.yaml
-git commit -m "chore(gitops): rollback hello-web prod -> v1"
+git commit -m "chore(gitops): rollback hello-web prod → v1"
 git push origin master
 ```
+
 
 ---
 
