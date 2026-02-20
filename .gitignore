@@ -1,0 +1,29 @@
+# Helm
+charts/*.tgz
+*.tgz
+.helm/
+
+# Secrets / credentials (never commit these)
+secrets/
+*.crt
+*.key
+*.pem
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+
+# ArgoCD / kubectl generated outputs
+/out/
+/rendered/
+
+# IDEs / editors
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+.cache/
