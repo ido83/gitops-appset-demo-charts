@@ -1,13 +1,11 @@
 # PROD values:
 # Same idea: immutable promotion by changing image.tag to a known-good SHA/tag.
-
+# 
 replicaCount: 3
-
 image:
   repository: idona/demo-app-set
-  tag: "v1"
+  tag: "v2"
   pullPolicy: IfNotPresent
-
 ingress:
   enabled: true
   className: nginx
@@ -23,7 +21,6 @@ ingress:
     - secretName: hello-web-tls
       hosts:
         - hello-web.example.com
-
 resources:
   requests:
     cpu: 100m
@@ -31,14 +28,14 @@ resources:
   limits:
     cpu: 500m
     memory: 512Mi
-
 appMetadata:
   environment: prod
   owner: platform-team
-  lastPromotedTag: ""
+  lastPromotedTag: "v2"
   # Promotion anchor — set by promote.sh when promoting staging → prod.
+
   # gitSHA records the exact git SHA of the staging/values.yaml commit being promoted.
   promotionAnchor:
-    gitSHA: ""
-    promotedAt: ""
+    gitSHA: "6f6c3ba7"
+    promotedAt: "2026-02-20T18:31:34Z"
     fromEnv: "staging"
