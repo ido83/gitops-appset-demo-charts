@@ -19,8 +19,10 @@ spec:
     - "https://github.com/ido83/gitops-appset-demo-app.git"
 
 
-  # Permit cluster-scoped resources only if needed; keep empty to be restrictive by default.
-  clusterResourceWhitelist: []
+  # Allow Namespace so ArgoCD can create per-env namespaces via CreateNamespace=true.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
 
   # Namespace-scoped resources allowed (tighten if needed).
   namespaceResourceWhitelist:
