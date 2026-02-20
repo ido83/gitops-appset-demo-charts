@@ -29,6 +29,8 @@ podLabels: {}
 
 podSecurityContext:
   runAsNonRoot: true
+  runAsUser: 65532   # distroless nonroot UID — required for Kubernetes to verify runAsNonRoot
+  runAsGroup: 65532
   seccompProfile:
     type: RuntimeDefault
 
