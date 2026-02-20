@@ -1,0 +1,114 @@
+# Default values for the generic-app chart.
+# Environment-specific overrides live in gitops-repo/apps/<app>/<env>/values.yaml.
+
+replicaCount: 2
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/example-org/hello-web
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# If you pull from a private registry, configure imagePullSecrets in env values.
+imagePullSecrets: []
+# Example:
+# imagePullSecrets:
+#   - name: regcred
+
+containerPort: 8080
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  # Example:
+  # hosts:
+  #   - host: hello.example.com
+  #     paths:
+  #       - path: /
+  #         pathType: Prefix
+  tls: []
+
+resources:
+  # Production best practice: set requests/limits to prevent noisy-neighbor issues.
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+livenessProbe:
+  enabled: true
+  path: /healthz
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  path: /healthz
+  initialDelaySeconds: 2
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 75
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Optional extra env vars passed to the container.
+env: []
+# Example:
+# env:
+#   - name: PORT
+#     value: "8080"
+
+# Optional command/args overrides.
+command: []
+args: []
+
+# Optional additional volumes/mounts (kept generic).
+extraVolumes: []
+extraVolumeMounts: []
+
+# A place for ApplicationSet/CI metadata that Helm templates do not use by default.
+# Keeping it here is harmless and useful for traceability in GitOps.
+appMetadata: {}

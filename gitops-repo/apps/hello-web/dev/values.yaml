@@ -1,0 +1,37 @@
+# DEV values:
+# - This file is the GitOps "promotion anchor" updated by Jenkins (image.tag).
+# - Argo CD watches gitops-repo and syncs when this tag changes.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/example-org/hello-web
+  # Jenkins updates ONLY this field to promote a specific immutable artifact.
+  tag: "00000000"
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    # Example: expose via nginx ingress
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  hosts:
+    - host: hello-web-dev.example.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+# Optional: extra trace metadata (not used by templates by default)
+appMetadata:
+  environment: dev
+  owner: platform-team
+  lastPromotedTag: ""

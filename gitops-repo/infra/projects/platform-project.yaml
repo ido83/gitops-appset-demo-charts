@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: >
+    Platform project limits blast radius by whitelisting allowed repos and destinations.
+    This is a recommended best practice for multi-tenant/secure Argo CD usage.
+
+  # Allow deploying only to the in-cluster API server (edit for multi-cluster).
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+
+  # Allow pulling from the gitops-repo only (tighten further in real orgs).
+  sourceRepos:
+    - "https://github.com/example-org/gitops-repo.git"
+    - "git@github.com:example-org/gitops-repo.git"
+
+  # Permit cluster-scoped resources only if needed; keep empty to be restrictive by default.
+  clusterResourceWhitelist: []
+
+  # Namespace-scoped resources allowed (tighten if needed).
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

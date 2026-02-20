@@ -1,0 +1,33 @@
+# STAGING values:
+# Promote here by updating image.tag to a tag that already exists in the registry.
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/example-org/hello-web
+  tag: "00000000"
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  hosts:
+    - host: hello-web-staging.example.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+appMetadata:
+  environment: staging
+  owner: platform-team
+  lastPromotedTag: ""

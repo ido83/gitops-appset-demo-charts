@@ -1,0 +1,8 @@
+apiVersion: v2
+name: generic-app
+description: >
+  A DRY, reusable Helm chart for standard web workloads (Deployment/Service/Ingress),
+  suitable for GitOps with Argo CD ApplicationSets.
+type: application
+version: 0.1.0
+appVersion: "0.0.0"

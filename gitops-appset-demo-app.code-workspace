@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "../gitops-appset-demo-app"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"**/templates/**/*.yaml": "helm",
+			"**/templates/**/*.yml": "helm",
+			"**/templates/**/*.tpl": "helm"
+		}
+	}
+}

@@ -1,0 +1,30 @@
+gitops-repo/
+├── README.md
+├── apps/
+│   └── hello-web/
+│       ├── dev/
+│       │   └── values.yaml
+│       ├── prod/
+│       │   └── values.yaml
+│       ├── staging/
+│       │   └── values.yaml
+│       └── preview/
+│           └── values.yaml
+├── charts/
+│   └── generic-app/
+│       ├── .helmignore
+│       ├── Chart.yaml
+│       ├── values.yaml
+│       └── templates/
+│           ├── _helpers.tpl
+│           ├── deployment.yaml
+│           ├── hpa.yaml
+│           ├── ingress.yaml
+│           ├── pdb.yaml
+│           ├── service.yaml
+│           └── serviceaccount.yaml
+└── infra/
+    ├── appsets/
+    │   └── hello-web-applicationset.yaml
+    └── projects/
+        └── platform-project.yaml

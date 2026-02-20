@@ -1,0 +1,10 @@
+# Patterns to ignore when packaging Helm charts.
+# Keeping charts lean reduces drift and speeds up rendering.
+
+.git/
+.gitignore
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.tmp

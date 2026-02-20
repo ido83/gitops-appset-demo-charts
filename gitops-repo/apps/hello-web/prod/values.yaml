@@ -1,0 +1,38 @@
+# PROD values:
+# Same idea: immutable promotion by changing image.tag to a known-good SHA/tag.
+
+replicaCount: 3
+
+image:
+  repository: ghcr.io/example-org/hello-web
+  tag: "00000000"
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    # In production you typically enforce TLS redirect.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: hello-web.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: hello-web-tls
+      hosts:
+        - hello-web.example.com
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+appMetadata:
+  environment: prod
+  owner: platform-team
+  lastPromotedTag: ""
