@@ -88,7 +88,7 @@ spec:
       sources:
         - repoURL: https://github.com/ido83/gitops-appset-demo-charts.git
           targetRevision: master
-          path: charts/generic-app
+          path: gitops-repo/charts/generic-app
           helm:
             releaseName: "{{ .values.app }}"
             valueFiles:
