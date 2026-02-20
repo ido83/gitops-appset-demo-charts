@@ -40,39 +40,32 @@ spec:
           ingressHost: ""
 
     # ---------------------------------------
-    # 2) BRANCH/PR-BASED DISCOVERY (EPHEMERAL)
+    # 2) BRANCH/PR-BASED DISCOVERY (EPHEMERAL) — disabled until github-token secret is created
     # ---------------------------------------
-    # ArgoCD's Pull Request generator discovers open PRs and exposes the PR *head branch* + SHAs
-    # (e.g., .branch, .head_short_sha). This is the recommended way to build ephemeral environments
-    # that track PR branches and clean up when PRs close.
+    # To enable: create the secret and uncomment this block.
+    #   kubectl create secret generic github-token -n argocd --from-literal=token=<PAT>
     #
-    # IMPORTANT SECURITY NOTE:
-    # PR generators have security implications; restrict who can create ApplicationSets and PRs.
-    - pullRequest:
-        requeueAfterSeconds: 300
-        github:
-          owner: example-org
-          repo: app-repo
-          # Optional: require a "preview" label so not every PR spawns an environment.
-          labels:
-            - preview
-          tokenRef:
-            secretName: github-token
-            key: token
-
-        # values.* keeps the template identical across both discovery methods (DRY).
-        values:
-          app: "hello-web"
-          env: "preview"
-          appName: "hello-web-pr-{{ .number }}-{{ .branch_slug }}"
-          namespace: "pr-{{ .number }}-{{ .branch_slug }}"
-          valuesFile: "$values/apps/hello-web/preview/values.yaml"
-          isPreview: "true"
-          prNumber: "{{ .number }}"
-          prBranch: "{{ .branch }}"
-          prHeadShortSHA: "{{ .head_short_sha }}"
-          # Put PR host pattern here so Helm can render a unique URL per PR.
-          ingressHost: "hello-web-pr-{{ .number }}-{{ .branch_slug }}.example.local"
+    # - pullRequest:
+    #     requeueAfterSeconds: 300
+    #     github:
+    #       owner: ido83
+    #       repo: gitops-appset-demo-app
+    #       labels:
+    #         - preview
+    #       tokenRef:
+    #         secretName: github-token
+    #         key: token
+    #     values:
+    #       app: "hello-web"
+    #       env: "preview"
+    #       appName: "hello-web-pr-{{ .number }}-{{ .branch_slug }}"
+    #       namespace: "pr-{{ .number }}-{{ .branch_slug }}"
+    #       valuesFile: "$values/apps/hello-web/preview/values.yaml"
+    #       isPreview: "true"
+    #       prNumber: "{{ .number }}"
+    #       prBranch: "{{ .branch }}"
+    #       prHeadShortSHA: "{{ .head_short_sha }}"
+    #       ingressHost: "hello-web-pr-{{ .number }}-{{ .branch_slug }}.example.local"
 
   template:
     metadata:
