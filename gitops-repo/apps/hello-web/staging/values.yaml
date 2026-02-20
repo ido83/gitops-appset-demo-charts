@@ -5,7 +5,7 @@ replicaCount: 2
 
 image:
   repository: idona/demo-app-set
-  tag: "v1"
+  tag: "v2"
   pullPolicy: IfNotPresent
 
 ingress:
@@ -30,4 +30,4 @@ resources:
 appMetadata:
   environment: staging
   owner: platform-team
-  lastPromotedTag: ""
+  lastPromotedTag: "v2"
