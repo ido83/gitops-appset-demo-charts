@@ -1,13 +1,11 @@
 # STAGING values:
 # Promote here by updating image.tag to a tag that already exists in the registry.
-
+# 
 replicaCount: 2
-
 image:
   repository: idona/demo-app-set
   tag: "v2"
   pullPolicy: IfNotPresent
-
 ingress:
   enabled: true
   className: nginx
@@ -18,7 +16,6 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
-
 resources:
   requests:
     cpu: 50m
@@ -26,14 +23,14 @@ resources:
   limits:
     cpu: 250m
     memory: 256Mi
-
 appMetadata:
   environment: staging
   owner: platform-team
   lastPromotedTag: "v2"
   # Promotion anchor — set by promote.sh when promoting dev → staging.
+
   # gitSHA records the exact git SHA of the dev/values.yaml commit being promoted.
   promotionAnchor:
-    gitSHA: ""
-    promotedAt: ""
+    gitSHA: "1f94b369"
+    promotedAt: "2026-02-20T18:31:12Z"
     fromEnv: "dev"
