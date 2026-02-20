@@ -1,323 +1,468 @@
-# gitops-repo
+# gitops-appset-demo-charts
 
-## Description
+GitOps source of truth for deploying applications to Kubernetes using Argo CD, ApplicationSets, and a single reusable Helm chart.
 
-This repository is the GitOps source of truth for deploying applications to Kubernetes using Argo CD, ApplicationSets, and a single reusable Helm chart.
+---
 
-It is designed to be DRY:
-- One generic Helm chart (`charts/generic-app`) that can deploy many services.
-- Environment/application configuration lives in `apps/<app>/<env>/values.yaml`.
-- Argo CD ApplicationSet automatically discovers:
-  - Stable environments by scanning folders (`apps/*/{dev,staging,prod}`).
-  - Ephemeral preview environments by scanning Pull Requests in `app-repo` (one environment per PR).
+## Table of Contents
 
-Promotion is Git-based:
-- CI builds and pushes an image tagged with an immutable short Git SHA.
-- CI updates only `image.tag` in the target environment values file.
-- Argo CD detects the Git change and syncs the cluster to that exact artifact.
+- [Architecture Overview](#architecture-overview)
+- [Repository Layout](#repository-layout)
+- [How It Works](#how-it-works)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Promotion Guide](#promotion-guide)
+- [Adding a New Application](#adding-a-new-application)
+- [PR Preview Environments](#pr-preview-environments)
+- [Common Operations](#common-operations)
+- [Known Gotchas](#known-gotchas)
 
-Repository layout (important paths):
-- charts/generic-app/                  DRY base Helm chart (Deployment/Service/Ingress + optional HPA/PDB)
-- apps/<app>/<env>/values.yaml         Env-specific values and the promotion anchor (image.tag)
-- infra/appsets/*.yaml                 Argo CD ApplicationSet definitions
-- infra/projects/*.yaml                Argo CD AppProject definitions (blast-radius control)
+---
+
+## Architecture Overview
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  app-repo (github.com/ido83/gitops-appset-demo-app)              │
+│  - Go application source                                          │
+│  - Dockerfile                                                      │
+│  - Jenkinsfile (builds image, updates values.yaml in this repo)  │
+└────────────────────────┬─────────────────────────────────────────┘
+                         │  Jenkins pushes image tag to ↓
+                         ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  gitops-appset-demo-charts (this repo)                           │
+│  - Helm chart  (charts/generic-app)                              │
+│  - Per-env values  (apps/hello-web/{dev,staging,prod}/values.yaml│
+│  - ArgoCD ApplicationSet + AppProject                            │
+└────────────────────────┬─────────────────────────────────────────┘
+                         │  ArgoCD watches + syncs ↓
+                         ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Kubernetes cluster                                               │
+│  - hello-web-dev      (1 replica)                                │
+│  - hello-web-staging  (2 replicas)                               │
+│  - hello-web-prod     (3 replicas)                               │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Key design principles:**
+- **Git is the single source of truth.** No `kubectl apply` from CI for app manifests.
+- **Immutable tags.** Promotion means copying an already-built tag to the next env, never rebuilding.
+- **DRY.** One Helm chart serves all environments and applications. Only `values.yaml` differs.
+- **ApplicationSet auto-discovery.** Adding a folder under `apps/<app>/<env>/` automatically creates an ArgoCD Application — no manual ArgoCD config needed.
+
+---
+
+## Repository Layout
+
+```
+gitops-repo/
+├── apps/
+│   └── hello-web/
+│       ├── dev/
+│       │   └── values.yaml       ← promotion anchor (Jenkins updates image.tag here)
+│       ├── staging/
+│       │   └── values.yaml
+│       ├── prod/
+│       │   └── values.yaml
+│       └── preview/
+│           └── values.yaml       ← base values for PR preview environments
+├── charts/
+│   └── generic-app/              ← reusable Helm chart
+│       ├── Chart.yaml
+│       ├── values.yaml           ← chart defaults
+│       └── templates/
+│           ├── deployment.yaml
+│           ├── service.yaml
+│           ├── ingress.yaml
+│           ├── hpa.yaml
+│           ├── pdb.yaml
+│           └── serviceaccount.yaml
+└── infra/
+    ├── appsets/
+    │   └── hello-web-applicationset.yaml   ← ArgoCD ApplicationSet
+    └── projects/
+        └── platform-project.yaml           ← ArgoCD AppProject (blast-radius control)
+```
+
+> **Note:** All paths above are relative to `gitops-repo/` inside this repository.
+> When referencing paths in ArgoCD manifests, prefix with `gitops-repo/`
+> (e.g. `gitops-repo/charts/generic-app`, `gitops-repo/apps/hello-web/dev`).
+
+---
+
+## How It Works
+
+### GitOps loop
+
+```
+1. Developer merges code to app-repo
+       ↓
+2. Jenkins builds & pushes image
+       docker build -t idona/demo-app-set:v2 .
+       docker push idona/demo-app-set:v2
+       ↓
+3. Jenkins updates dev values.yaml
+       image.tag: "v1" → "v2"
+       git commit + push → this repo
+       ↓
+4. ArgoCD detects the Git change (polls every ~3 min or via webhook)
+       ↓
+5. ArgoCD syncs hello-web-dev → rolls out idona/demo-app-set:v2
+       ↓
+6. After verification, a human (or automated gate) promotes to staging
+       (same image tag, new env values.yaml updated, Git commit + push)
+       ↓
+7. ArgoCD syncs hello-web-staging
+       ↓
+8. Repeat for prod (with approval gate in Jenkins pipeline)
+```
+
+### ApplicationSet directory generator
+
+The ApplicationSet scans `gitops-repo/apps/*/dev|staging|prod` for directories. Each directory maps to one ArgoCD Application:
+
+| Directory | ArgoCD Application | Namespace |
+|-----------|-------------------|-----------|
+| `gitops-repo/apps/hello-web/dev` | `hello-web-dev` | `hello-web-dev` |
+| `gitops-repo/apps/hello-web/staging` | `hello-web-staging` | `hello-web-staging` |
+| `gitops-repo/apps/hello-web/prod` | `hello-web-prod` | `hello-web-prod` |
+
+To add a new app/env, just add a folder — ArgoCD picks it up automatically.
+
+---
+
+## Prerequisites
+
+1. Kubernetes cluster (minikube, k3s, EKS, GKE, etc.)
+2. `kubectl` configured to access the cluster
+3. ArgoCD installed in namespace `argocd`
+4. Docker Hub account (images are pushed to `docker.io/idona/demo-app-set`)
+5. GitHub access to both repos:
+   - `github.com/ido83/gitops-appset-demo-charts` (this repo)
+   - `github.com/ido83/gitops-appset-demo-app` (app source)
+6. Ingress controller if you enable ingress in values files (e.g., `minikube addons enable ingress`)
+
+---
 
 ## Installation
 
-### Prerequisites
-
-1) Kubernetes cluster (k3s/k8s/minikube/EKS/etc.)
-2) kubectl configured to access the cluster
-3) Argo CD installed in namespace `argocd`
-4) Access to this repository from Argo CD (HTTPS or SSH)
-5) If using PR preview environments:
-   - A GitHub Personal Access Token (PAT) with permission to read PR metadata
-   - A Kubernetes Secret in `argocd` namespace containing the PAT (see below)
-6) Ingress Controller installed (e.g., nginx ingress), if you enable ingress in values files
-
-### Install Argo CD (quick install)
-
-Note: In production you likely install Argo CD via Helm and manage it with GitOps as well. This quick install is convenient for labs/demos.
-
-1) Create namespace:
+### 1. Install ArgoCD
 
 ```bash
 kubectl create namespace argocd
-```
 
-2) Install Argo CD:
-
-```bash
 kubectl apply -n argocd \
   -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-```
 
-3) Wait for Argo CD to be ready:
-
-```bash
+# Wait for all components to be ready
 kubectl -n argocd rollout status deployment/argocd-server
 kubectl -n argocd rollout status deployment/argocd-repo-server
-kubectl -n argocd rollout status deployment/argocd-application-controller
+kubectl -n argocd rollout status statefulset/argocd-application-controller
 ```
 
-### Configure PR generator token (required only for PR preview environments)
+### 2. Apply the AppProject
 
-The ApplicationSet PR generator references:
+The AppProject restricts which repos and destinations ArgoCD can use — limits blast radius.
 
-- secretName: github-token
-- key: token
+```bash
+kubectl apply -f gitops-repo/infra/projects/platform-project.yaml
+```
 
-Create it (replace with your token):
+### 3. Apply the ApplicationSet
+
+```bash
+kubectl apply -f gitops-repo/infra/appsets/hello-web-applicationset.yaml
+```
+
+### 4. Verify
+
+```bash
+# Should show hello-web ApplicationSet
+kubectl -n argocd get applicationsets
+
+# After ~30 seconds, should show hello-web-dev, hello-web-staging, hello-web-prod
+kubectl -n argocd get applications
+
+# Check pods are running
+kubectl get pods -n hello-web-dev
+kubectl get pods -n hello-web-staging
+kubectl get pods -n hello-web-prod
+```
+
+Expected output:
+```
+NAME                SYNC STATUS   HEALTH STATUS
+hello-web-dev       Synced        Healthy
+hello-web-staging   Synced        Healthy
+hello-web-prod      Synced        Healthy
+```
+
+### 5. (Optional) Enable PR preview environments
+
+The PR generator is disabled by default until the GitHub token secret exists.
+To enable it:
+
+```bash
+# Create a GitHub PAT with read access to pull request metadata
+kubectl -n argocd create secret generic github-token \
+  --from-literal=token='<YOUR_GITHUB_PAT>'
+```
+
+Then uncomment the `pullRequest` generator block in
+`gitops-repo/infra/appsets/hello-web-applicationset.yaml` and re-apply.
+
+---
+
+## Promotion Guide
+
+Promotion = updating `image.tag` in a target environment's `values.yaml`, committing, and pushing.
+ArgoCD detects the Git change and rolls out the new version automatically.
+
+### The promotion anchor
+
+Each environment has one file that acts as the promotion anchor:
+
+```
+gitops-repo/apps/hello-web/
+├── dev/values.yaml       ← image.tag updated here first (by Jenkins or manually)
+├── staging/values.yaml   ← promoted from dev
+└── prod/values.yaml      ← promoted from staging (requires approval gate)
+```
+
+The only field that changes during promotion:
+
+```yaml
+image:
+  repository: idona/demo-app-set
+  tag: "v2"              # ← this is the promotion anchor
+```
+
+---
+
+### Step-by-step: Promote dev → staging
+
+**Step 1 — confirm what tag is currently running in dev:**
+
+```bash
+kubectl get deployment -n hello-web-dev \
+  -o jsonpath='{.items[0].spec.template.spec.containers[0].image}'
+# idona/demo-app-set:v2
+
+# Or read directly from the values file:
+grep 'tag:' gitops-repo/apps/hello-web/dev/values.yaml
+# tag: "v2"
+```
+
+**Step 2 — update staging values.yaml:**
+
+```bash
+# Using yq (recommended — safe YAML edit):
+TAG="$(yq -r '.image.tag' gitops-repo/apps/hello-web/dev/values.yaml)"
+
+yq -i ".image.tag = \"${TAG}\""                    gitops-repo/apps/hello-web/staging/values.yaml
+yq -i ".appMetadata.lastPromotedTag = \"${TAG}\""  gitops-repo/apps/hello-web/staging/values.yaml
+```
+
+Or edit manually in your editor — change only the `tag` field in
+[gitops-repo/apps/hello-web/staging/values.yaml](gitops-repo/apps/hello-web/staging/values.yaml).
+
+**Step 3 — commit and push:**
+
+```bash
+git add gitops-repo/apps/hello-web/staging/values.yaml
+git commit -m "chore(gitops): promote hello-web staging -> ${TAG}"
+git push origin master
+```
+
+**Step 4 — ArgoCD syncs automatically (within ~3 minutes). Verify:**
+
+```bash
+kubectl -n argocd get application hello-web-staging
+# NAME                SYNC STATUS   HEALTH STATUS
+# hello-web-staging   Synced        Healthy
+
+kubectl get deployment -n hello-web-staging \
+  -o jsonpath='{.items[0].spec.template.spec.containers[0].image}'
+# idona/demo-app-set:v2
+```
+
+**Force immediate sync (optional — skips the poll wait):**
+
+```bash
+kubectl -n argocd patch application hello-web-staging \
+  --type merge \
+  -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'
+```
+
+---
+
+### Step-by-step: Promote staging → prod
+
+Same flow, different file. In production, this should be gated behind a PR approval or Jenkins `input` step.
+
+```bash
+TAG="$(yq -r '.image.tag' gitops-repo/apps/hello-web/staging/values.yaml)"
+
+yq -i ".image.tag = \"${TAG}\""                    gitops-repo/apps/hello-web/prod/values.yaml
+yq -i ".appMetadata.lastPromotedTag = \"${TAG}\""  gitops-repo/apps/hello-web/prod/values.yaml
+
+git add gitops-repo/apps/hello-web/prod/values.yaml
+git commit -m "chore(gitops): promote hello-web prod -> ${TAG}"
+git push origin master
+```
+
+---
+
+### Full promotion flow (all envs in one script)
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP="hello-web"
+TAG="${1:?Usage: $0 <image-tag>}"   # e.g. ./promote.sh v3
+
+REPO_ROOT="gitops-repo"
+
+for ENV in dev staging prod; do
+  FILE="${REPO_ROOT}/apps/${APP}/${ENV}/values.yaml"
+  echo "Promoting ${APP} ${ENV} -> ${TAG}"
+  yq -i ".image.tag = \"${TAG}\""                   "${FILE}"
+  yq -i ".appMetadata.lastPromotedTag = \"${TAG}\"" "${FILE}"
+  git add "${FILE}"
+done
+
+git commit -m "chore(gitops): promote ${APP} all envs -> ${TAG}"
+git push origin master
+```
+
+---
+
+### Rollback
+
+Rollback is just promoting an older tag. Find the last known-good tag in git history:
+
+```bash
+git log --oneline gitops-repo/apps/hello-web/prod/values.yaml
+# abc1234 chore(gitops): promote hello-web prod -> v2
+# def5678 chore(gitops): promote hello-web prod -> v1  ← rollback target
+
+# Promote v1 back to prod:
+yq -i '.image.tag = "v1"' gitops-repo/apps/hello-web/prod/values.yaml
+git add gitops-repo/apps/hello-web/prod/values.yaml
+git commit -m "chore(gitops): rollback hello-web prod -> v1"
+git push origin master
+```
+
+---
+
+## Adding a New Application
+
+1. Create environment folders:
+
+```bash
+mkdir -p gitops-repo/apps/my-service/{dev,staging,prod}
+```
+
+2. Create `values.yaml` in each folder (copy from `hello-web` as a template):
+
+```bash
+cp gitops-repo/apps/hello-web/dev/values.yaml     gitops-repo/apps/my-service/dev/values.yaml
+cp gitops-repo/apps/hello-web/staging/values.yaml gitops-repo/apps/my-service/staging/values.yaml
+cp gitops-repo/apps/hello-web/prod/values.yaml    gitops-repo/apps/my-service/prod/values.yaml
+```
+
+3. Edit each file: update `image.repository`, `image.tag`, `ingress.hosts`, and `appMetadata.environment`.
+
+4. Commit and push:
+
+```bash
+git add gitops-repo/apps/my-service
+git commit -m "feat(gitops): add my-service environments"
+git push origin master
+```
+
+5. The ApplicationSet directory generator auto-discovers the new folders and creates:
+   - `my-service-dev` Application → namespace `my-service-dev`
+   - `my-service-staging` Application → namespace `my-service-staging`
+   - `my-service-prod` Application → namespace `my-service-prod`
+
+No manual ArgoCD configuration needed.
+
+---
+
+## PR Preview Environments
+
+When enabled, the ApplicationSet's `pullRequest` generator creates an ephemeral environment for each open PR in `gitops-appset-demo-app` that has the `preview` label.
+
+| What | Value |
+|------|-------|
+| Application name | `hello-web-pr-<number>-<branch-slug>` |
+| Namespace | `pr-<number>-<branch-slug>` |
+| Image tag | PR head commit SHA (set by CI) |
+| Ingress host | `hello-web-pr-<number>-<branch-slug>.example.local` |
+
+**To enable:**
 
 ```bash
 kubectl -n argocd create secret generic github-token \
   --from-literal=token='<YOUR_GITHUB_PAT>'
 ```
 
-Security note:
-- Restrict who can create/modify ApplicationSets.
-- Consider requiring a PR label (this repo’s ApplicationSet expects label "preview") to avoid creating environments for every PR.
+Then uncomment the `pullRequest` generator block in the ApplicationSet and re-apply.
 
-### Apply GitOps resources from this repo
+**Lifecycle:**
+- Environment is created when a PR gets the `preview` label.
+- Environment is destroyed when the PR is closed/merged (ArgoCD prune removes it).
 
-From a clone of gitops-repo:
+---
 
-1) Apply the Argo CD project (recommended blast-radius control):
+## Common Operations
 
-```bash
-kubectl apply -n argocd -f infra/projects/platform-project.yaml
-```
-
-2) Apply the ApplicationSet:
-
-```bash
-kubectl apply -n argocd -f infra/appsets/hello-web-applicationset.yaml
-```
-
-Verify resources:
-
-```bash
-kubectl -n argocd get appprojects
-kubectl -n argocd get applicationsets
-kubectl -n argocd get applications
-```
-
-If folder discovery is configured correctly, you should see generated Applications for:
-- apps/hello-web/dev
-- apps/hello-web/staging
-- apps/hello-web/prod
-
-## Usage
-
-### How the system works (GitOps loop)
-
-1) A container image is built in CI (in app-repo) and pushed to the registry.
-2) CI updates the GitOps promotion anchor in this repo:
-   - apps/<app>/<env>/values.yaml -> image.tag: "<immutable_sha>"
-3) Argo CD detects the Git change and syncs the Kubernetes resources to match.
-4) Promoting to another environment is a Git change:
-   - Update the target env values file’s image.tag to the same already-built SHA.
-
-This ensures:
-- You promote the exact tested artifact.
-- Cluster state always converges to Git state (pull model).
-
-### Deploy / update dev, staging, prod (stable environments)
-
-Stable environments are discovered by folder scanning:
-- apps/*/dev
-- apps/*/staging
-- apps/*/prod
-
-To deploy a new version to dev:
-- Update apps/<app>/dev/values.yaml image.tag to the desired SHA and push.
-- Argo CD will reconcile automatically.
-
-Example using yq:
-
-```bash
-git clone https://github.com/example-org/gitops-repo.git
-cd gitops-repo
-
-yq -i '.image.tag = "a1b2c3d4"' apps/hello-web/dev/values.yaml
-
-git add apps/hello-web/dev/values.yaml
-git commit -m "chore(gitops): deploy hello-web dev -> a1b2c3d4"
-git push origin main
-```
-
-Confirm Argo CD synced:
-
+**List all ArgoCD Applications:**
 ```bash
 kubectl -n argocd get applications
 ```
 
-Confirm the running app version:
-
+**Check sync + health status of one app:**
 ```bash
-kubectl -n hello-web-dev get pods
-kubectl -n hello-web-dev port-forward svc/generic-app 8080:80
-
-curl -s http://localhost:8080/ | jq .
+kubectl -n argocd get application hello-web-dev \
+  -o jsonpath='Sync: {.status.sync.status}  Health: {.status.health.status}{"\n"}'
 ```
 
-Note:
-- The chart name is generic and may produce stable names. What matters is the image tag and namespace.
-- If you change naming, ensure Service/Ingress selectors still match.
-
-### Promotion flow (Dev -> Staging -> Prod)
-
-Promotion is changing only one field: image.tag.
-
-Example: promote the same SHA from dev to staging:
-
-1) Read dev’s current tag:
-
+**Force immediate refresh (re-read Git):**
 ```bash
-yq '.image.tag' apps/hello-web/dev/values.yaml
+kubectl -n argocd patch application hello-web-dev \
+  --type merge \
+  -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'
 ```
 
-2) Set staging to the same tag:
-
+**Check what image is running:**
 ```bash
-TAG="$(yq -r '.image.tag' apps/hello-web/dev/values.yaml)"
-yq -i ".image.tag = \"${TAG}\"" apps/hello-web/staging/values.yaml
-
-git add apps/hello-web/staging/values.yaml
-git commit -m "chore(gitops): promote hello-web staging -> ${TAG}"
-git push origin main
+kubectl get deployment -n hello-web-dev \
+  -o jsonpath='{.items[0].spec.template.spec.containers[0].image}'
 ```
 
-Promote staging -> prod in the same way:
-
+**Port-forward to test the app directly:**
 ```bash
-TAG="$(yq -r '.image.tag' apps/hello-web/staging/values.yaml)"
-yq -i ".image.tag = \"${TAG}\"" apps/hello-web/prod/values.yaml
-
-git add apps/hello-web/prod/values.yaml
-git commit -m "chore(gitops): promote hello-web prod -> ${TAG}"
-git push origin main
+kubectl -n hello-web-dev port-forward svc/hello-web 8080:80
+curl http://localhost:8080/
 ```
 
-Recommended controls:
-- Require PR approvals for staging/prod changes.
-- Add Jenkins/manual approval gates for non-dev environment promotions.
-- Use protected branches on gitops-repo.
+---
 
-### Ephemeral PR preview environments
+## Known Gotchas
 
-Preview environments are generated from Pull Requests in app-repo using the ApplicationSet pullRequest generator.
+Lessons learned deploying this demo — here to save you time:
 
-Behavior:
-- For each open PR with the label "preview", Argo CD generates:
-  - An Application named like: hello-web-pr-<number>-<branch_slug>
-  - A namespace like: pr-<number>-<branch_slug>
-  - A Helm values override that sets image.tag = PR head_short_sha
-
-This is DRY because:
-- Base preview behavior is described once in apps/hello-web/preview/values.yaml
-- Per-PR uniqueness (namespace, host, tag) comes from ApplicationSet templating
-
-How to use:
-1) Open a PR in app-repo
-2) Add label "preview" to the PR
-3) Ensure the PR image is built and pushed tagged by commit SHA (CI responsibility)
-4) Argo CD will create the preview namespace and deploy it
-
-Verify:
-
-```bash
-kubectl -n argocd get applications | grep hello-web-pr
-kubectl get ns | grep '^pr-'
-```
-
-Cleanup:
-- When the PR closes, the ApplicationSet no longer generates that Application.
-- With automated pruning enabled, resources are removed.
-
-Security note:
-- PR generators can be abused if not controlled. Restrict who can label PRs and who can alter ApplicationSets.
-
-### Adding a new application using the same generic chart
-
-1) Create environment folders:
-
-```bash
-mkdir -p apps/my-service/dev apps/my-service/staging apps/my-service/prod
-```
-
-2) Add values files similar to hello-web:
-
-apps/my-service/dev/values.yaml:
-- image.repository: <your-registry>/<your-image>
-- image.tag: <sha>
-- ingress.hosts: <dev host>
-- resources/probes/etc.
-
-3) Commit and push:
-
-```bash
-git add apps/my-service
-git commit -m "feat(gitops): add my-service environments"
-git push origin main
-```
-
-4) ApplicationSet directory generator will auto-create Applications because it scans apps/*/{dev,staging,prod}.
-
-### Common operations
-
-List Applications:
-
-```bash
-kubectl -n argocd get applications
-kubectl -n argocd get applicationsets
-```
-
-Force a refresh (rarely needed; Argo CD polls and also watches webhooks if configured):
-
-```bash
-kubectl -n argocd annotate applicationset hello-web \
-  argocd.argoproj.io/refresh=hard --overwrite
-```
-
-Check sync status:
-
-```bash
-kubectl -n argocd get application hello-web-dev -o jsonpath='{.status.sync.status}{"\n"}'
-kubectl -n argocd get application hello-web-dev -o jsonpath='{.status.health.status}{"\n"}'
-```
-
-### Why the configuration is production-oriented
-
-Key best practices implemented:
-- Git as the single source of truth (no kubectl apply from CI for app manifests)
-- Immutable image tags for promotion safety (short SHA)
-- AppProject used to limit allowed sources/destinations
-- Automated sync + self-heal + prune for drift control
-- Helm chart security defaults:
-  - non-root, seccomp, readOnlyRootFilesystem, drop Linux capabilities
-- Values separated by environment folder to reduce duplication and accidental cross-env changes
-
-## License
-
-MIT License
-
-Copyright (c) 2026
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `app path does not exist` | Chart path missing `gitops-repo/` prefix | Use `gitops-repo/charts/generic-app`, not `charts/generic-app` |
+| `unable to resolve 'main' to a commit SHA` | Branch is `master`, not `main` | Set `revision: master` and `targetRevision: master` in ApplicationSet |
+| `resource :Namespace is not permitted in project` | AppProject `clusterResourceWhitelist` is empty | Add `- group: "" kind: Namespace` to `clusterResourceWhitelist` |
+| `container has runAsNonRoot and image has non-numeric user (nonroot)` | Distroless uses named user, Kubernetes needs numeric UID | Add `runAsUser: 65532` + `runAsGroup: 65532` to `podSecurityContext` |
+| `error converting YAML to JSON` on ApplicationSet apply | Go template `{{- if }}` inside `valuesObject` is not valid YAML | Use `values` (string) instead of `valuesObject` (structured) |
+| PR generator crashes on startup | `github-token` Secret missing in `argocd` namespace | Create the secret or comment out the `pullRequest` generator |
+| Applications generated but 0 resources synced | `apps/*/env` paths don't match actual repo layout | Paths in the `git` generator must match the repo directory structure exactly |
