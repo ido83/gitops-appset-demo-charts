@@ -4,8 +4,8 @@
 replicaCount: 3
 
 image:
-  repository: ghcr.io/example-org/hello-web
-  tag: "00000000"
+  repository: idona/demo-app-set
+  tag: "v1"
   pullPolicy: IfNotPresent
 
 ingress:
