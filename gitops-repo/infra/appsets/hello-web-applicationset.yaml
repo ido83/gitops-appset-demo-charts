@@ -15,8 +15,8 @@ spec:
     # This Git directory generator scans *directories* in gitops-repo under apps/*/{dev,staging,prod}.
     # When you add a new folder (e.g., apps/foo/dev), ArgoCD automatically creates a new Application.
     - git:
-        repoURL: https://github.com/ido83/gitops-appset-demo-app.git
-        revision: main
+        repoURL: https://github.com/ido83/gitops-appset-demo-charts.git
+        revision: master
         directories:
           - path: apps/*/dev
           - path: apps/*/staging
@@ -94,26 +94,24 @@ spec:
       # This is DRY: chart is reused; env values live in apps/<app>/<env>/values.yaml.
       sources:
         - repoURL: https://github.com/ido83/gitops-appset-demo-charts.git
-          targetRevision: main
+          targetRevision: master
           path: charts/generic-app
           helm:
             releaseName: "{{ .values.app }}"
             valueFiles:
               - "{{ .values.valuesFile }}"
 
-            # valuesObject lets ApplicationSet inject dynamic per-generator overrides without
+            # values (string) lets ApplicationSet inject dynamic per-generator overrides without
             # duplicating whole values files (especially important for PR previews).
-            valuesObject:
-              # Always include a harmless metadata object so YAML is valid in both modes.
+            # Must use `values` (not `valuesObject`) so kubectl stores it as a raw string and
+            # ArgoCD's Go template engine processes the {{- if }} blocks without YAML parse errors.
+            values: |
               appMetadata:
                 generatedBy: "applicationset"
                 env: "{{ .values.env }}"
                 prNumber: "{{ .values.prNumber }}"
                 prBranch: "{{ .values.prBranch }}"
                 prHeadShortSHA: "{{ .values.prHeadShortSHA }}"
-
-              # If this is a preview/PR application, override image.tag to the PR head SHA.
-              # For folder-based envs, image.tag comes from the env values.yaml (Jenkins updates it).
               {{- if eq .values.isPreview "true" }}
               image:
                 tag: "{{ .values.prHeadShortSHA }}"
@@ -127,7 +125,7 @@ spec:
               {{- end }}
 
         - repoURL: https://github.com/ido83/gitops-appset-demo-app.git
-          targetRevision: main
+          targetRevision: master
           ref: values
 
       syncPolicy:

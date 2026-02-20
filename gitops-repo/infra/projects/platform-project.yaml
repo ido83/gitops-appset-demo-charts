@@ -15,8 +15,9 @@ spec:
 
   # Allow pulling from the gitops-repo only (tighten further in real orgs).
   sourceRepos:
-    - "https://github.com/example-org/gitops-repo.git"
-    - "git@github.com:example-org/gitops-repo.git"
+    - "https://github.com/ido83/gitops-appset-demo-charts.git"
+    - "https://github.com/ido83/gitops-appset-demo-app.git"
+
 
   # Permit cluster-scoped resources only if needed; keep empty to be restrictive by default.
   clusterResourceWhitelist: []
