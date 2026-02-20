@@ -36,3 +36,9 @@ appMetadata:
   environment: prod
   owner: platform-team
   lastPromotedTag: ""
+  # Promotion anchor — set by promote.sh when promoting staging → prod.
+  # gitSHA records the exact git SHA of the staging/values.yaml commit being promoted.
+  promotionAnchor:
+    gitSHA: ""
+    promotedAt: ""
+    fromEnv: "staging"

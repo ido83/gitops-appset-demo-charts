@@ -35,3 +35,10 @@ appMetadata:
   environment: dev
   owner: platform-team
   lastPromotedTag: "v2"
+  # Promotion anchor — set by the promote.sh script.
+  # gitSHA is the git commit SHA of the CI commit that last touched this file.
+  # Downstream environments read this SHA to prove they are promoting a known, committed state.
+  promotionAnchor:
+    gitSHA: ""       # populated by CI / promote.sh
+    promotedAt: ""
+    fromEnv: "ci"    # dev is always promoted from CI, not from another env
