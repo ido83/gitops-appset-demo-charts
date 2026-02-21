@@ -10,6 +10,17 @@ image:
   tag: "v2"
   pullPolicy: IfNotPresent
 
+# Private registry support:
+# Uncomment and set the secret name when pulling from a private registry.
+# The Secret must already exist in the target namespace (never store credentials in Git).
+# Create it with:
+#   kubectl -n hello-web-dev create secret docker-registry regcred \
+#     --docker-server=<registry-host> \
+#     --docker-username=<user> \
+#     --docker-password=<token-or-password>
+# imagePullSecrets:
+#   - name: regcred
+
 ingress:
   enabled: true
   className: nginx

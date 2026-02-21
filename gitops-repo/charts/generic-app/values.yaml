@@ -12,10 +12,20 @@ image:
   pullPolicy: IfNotPresent
 
 # If you pull from a private registry, configure imagePullSecrets in env values.
+# imagePullSecrets: leave empty for public registries (current default).
+# For private registries, set to the name of a pre-existing docker-registry Secret
+# in the target namespace. The Secret itself is NOT stored here — create it out-of-band:
+#
+#   kubectl -n <namespace> create secret docker-registry regcred \
+#     --docker-server=<registry-host> \
+#     --docker-username=<user> \
+#     --docker-password=<token-or-password>
+#
+# Then uncomment and set the name in the env-specific values.yaml (not here).
+# Never put credentials in Git.
 imagePullSecrets: []
-# Example:
 # imagePullSecrets:
-#   - name: regcred
+#   - name: regcred    # name of the Secret in the target namespace
 
 containerPort: 8080
 
