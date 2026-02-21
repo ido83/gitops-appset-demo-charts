@@ -4,9 +4,8 @@
 replicaCount: 3
 image:
   repository: idona/demo-app-set
-  tag: "v2"
+  tag: "v3"
   pullPolicy: IfNotPresent
-
 # Private registry support:
 # Uncomment and set the secret name when pulling from a private registry.
 # The Secret must already exist in the target namespace (never store credentials in Git).
@@ -42,11 +41,11 @@ resources:
 appMetadata:
   environment: prod
   owner: platform-team
-  lastPromotedTag: "v2"
+  lastPromotedTag: "v3"
   # Promotion anchor — set by promote.sh when promoting staging → prod.
 
   # gitSHA records the exact git SHA of the staging/values.yaml commit being promoted.
   promotionAnchor:
-    gitSHA: "6f6c3ba7"
-    promotedAt: "2026-02-20T18:31:34Z"
+    gitSHA: "0348c9d8"
+    promotedAt: "2026-02-21T17:54:09Z"
     fromEnv: "staging"
