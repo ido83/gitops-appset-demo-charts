@@ -14,6 +14,7 @@ GitOps source of truth for deploying applications to Kubernetes using Argo CD, A
 - [Promotion Guide](#promotion-guide)
 - [Adding a New Application](#adding-a-new-application)
 - [PR Preview Environments](#pr-preview-environments)
+- [Private Registry Support](#private-registry-support)
 - [Common Operations](#common-operations)
 - [Known Gotchas](#known-gotchas)
 
@@ -412,6 +413,65 @@ Then uncomment the `pullRequest` generator block in the ApplicationSet and re-ap
 **Lifecycle:**
 - Environment is created when a PR gets the `preview` label.
 - Environment is destroyed when the PR is closed/merged (ArgoCD prune removes it).
+
+---
+
+## Private Registry Support
+
+By default, all environments pull from a **public registry** (`docker.io/idona/demo-app-set`) — no pull credentials needed.
+
+When you switch to a private registry, Kubernetes needs a `docker-registry` Secret in each target namespace. The secret is **never stored in Git** — only the secret *name* is referenced in `values.yaml`.
+
+### How it works
+
+The Helm chart's `deployment.yaml` uses:
+
+```yaml
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 8 }}
+{{- end }}
+```
+
+When `imagePullSecrets` is empty (`[]`, the default), nothing is rendered. When you set it to a list of secret names, those secrets are attached to the pod.
+
+### Enabling private registry pull for an environment
+
+**Step 1 — Create the pull secret in each target namespace** (one-time, out-of-band):
+
+```bash
+# Repeat for each namespace that needs private pull access
+for NS in hello-web-dev hello-web-staging hello-web-prod; do
+  kubectl -n "${NS}" create secret docker-registry regcred \
+    --docker-server=<registry-host> \
+    --docker-username=<user> \
+    --docker-password=<token-or-password>
+done
+```
+
+> For Docker Hub private repos the server is `https://index.docker.io/v1/`.
+
+**Step 2 — Uncomment `imagePullSecrets` in the env `values.yaml`:**
+
+```yaml
+# apps/hello-web/dev/values.yaml  (same pattern for staging and prod)
+imagePullSecrets:
+  - name: regcred    # must match the Secret name created above
+```
+
+**Step 3 — Commit and push:**
+
+```bash
+git add gitops-repo/apps/hello-web/dev/values.yaml
+git commit -m "feat(gitops): enable private registry pull for hello-web-dev"
+git push origin master
+```
+
+ArgoCD detects the change and rolls out pods with the pull secret attached — no other config needed.
+
+### Reverting to public registry
+
+Comment out (or remove) the `imagePullSecrets` block and push. The chart default (`imagePullSecrets: []`) takes effect and no pull secret is attached.
 
 ---
 
